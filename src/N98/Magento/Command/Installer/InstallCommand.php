@@ -256,79 +256,6 @@ HELP;
         $this->config['magentoVersionData'] = $this->commandConfig['magento-packages'][$type - 1];
     }
 
-    /**
-     * @param InputInterface $input
-     * @param OutputInterface $output
-     */
-    protected function chooseInstallationFolder(InputInterface $input, OutputInterface $output)
-    {
-        $validateInstallationFolder = function($folderName) use ($input) {
-
-            $folderName = rtrim(trim($folderName, ' '), '/');
-            if (substr($folderName, 0, 1) == '.') {
-                $cwd = \getcwd() ;
-                if (empty($cwd) && isset($_SERVER['PWD'])) {
-                    $cwd = $_SERVER['PWD'];
-                }
-                $folderName = $cwd . substr($folderName, 1);
-            }
-
-            if (empty($folderName)) {
-                throw new \InvalidArgumentException('Installation folder cannot be empty');
-            }
-
-            if (!is_dir($folderName)) {
-                if (!@mkdir($folderName,0777, true)) {
-                    throw new \InvalidArgumentException('Cannot create folder.');
-                }
-
-                return $folderName;
-            }
-
-            if ($input->getOption('noDownload')) {
-                /** @var MagentoHelper $magentoHelper */
-                $magentoHelper = new MagentoHelper();
-                $magentoHelper->detect($folderName);
-                if ($magentoHelper->getRootFolder() !== $folderName) {
-                    throw new \InvalidArgumentException(
-                        sprintf(
-                            'Folder %s is not a Magento working copy.',
-                            $folderName
-                        )
-                    );
-                }
-
-                $localXml = $folderName . '/app/etc/local.xml';
-                if (file_exists($localXml)) {
-                    throw new \InvalidArgumentException(
-                        sprintf(
-                            'Magento working copy in %s seems already installed. Please remove %s and retry.',
-                            $folderName,
-                            $localXml
-                        )
-                    );
-                }
-            }
-
-            return $folderName;
-        };
-
-        if (($installationFolder = $input->getOption('installationFolder')) == null) {
-            $defaultFolder = './magento';
-            $question[] = "<question>Enter installation folder:</question> [<comment>" . $defaultFolder . "</comment>]";
-
-            $installationFolder = $this->getHelper('dialog')->askAndValidate($output, $question, $validateInstallationFolder, false, $defaultFolder);
-
-        } else {
-            // @Todo improve validation and bring it to 1 single function
-            $installationFolder = $validateInstallationFolder($installationFolder);
-
-        }
-
-        $this->config['installationFolder'] = realpath($installationFolder);
-        \chdir($this->config['installationFolder']);
-    }
-
     protected function test($folderName)
     {
 
@@ -350,16 +277,25 @@ HELP;
                 return false;
             }
 
+            $composer = $this->getComposer($input, $output);
+            $targetFolder = $this->getTargetFolderByType($composer, $package, $this->config['installationFolder']);
             $this->config['magentoPackage'] = $this->downloadByComposerConfig(
                 $input,
                 $output,
                 $package,
-                $this->config['installationFolder'] . '/_n98_magerun_download',
+                $targetFolder,
                 true
             );
 
-            $filesystem = new \Composer\Util\Filesystem();
-            $filesystem->copyThenRemove($this->config['installationFolder'] . '/_n98_magerun_download', $this->config['installationFolder']);
+            if ($this->isSourceTypeRepository($package->getSourceType())) {
+                $filesystem = new \N98\Util\Filesystem;
+                $filesystem->recursiveCopy($targetFolder, $this->config['installationFolder'], array('.git', '.hg'));
+            } else {
+                $filesystem = new \Composer\Util\Filesystem();
+                $filesystem->copyThenRemove(
+                    $this->config['installationFolder'] . '/_n98_magerun_download', $this->config['installationFolder']
+                );
+            }
 
             if (version_compare(PHP_VERSION, '5.4.0') >= 0) {
                 // Patch installer
@@ -371,6 +307,36 @@ HELP;
         }
 
         return true;
+    }
+
+    /**
+     * construct a folder to where magerun will download the source to, cache git/hg repositories under COMPOSER_HOME
+     *
+     * @param $composer
+     * @param $package
+     * @param $installationFolder
+     *
+     * @return string
+     */
+    protected function getTargetFolderByType($composer, $package, $installationFolder)
+    {
+        $type = $package->getSourceType();
+        if ($this->isSourceTypeRepository($type)) {
+            $targetPath = sprintf(
+                '%s/%s/%s/%s',
+                $composer->getConfig()->get('cache-dir'),
+                '_n98_magerun_download',
+                $type,
+                preg_replace('{[^a-z0-9.]}i', '-', $package->getSourceUrl())
+            );
+        } else {
+            $targetPath = sprintf(
+                '%s/%s',
+                $installationFolder,
+                '_n98_magerun_download'
+            );
+        }
+        return $targetPath;
     }
 
     /**
@@ -774,7 +740,7 @@ HELP;
             @mkdir($defaultSessionFolder);
         }
 
-        return array(
+        $argv = array(
             'license_agreement_accepted' => 'yes',
             'locale'                     => $locale,
             'timezone'                   => $timezone,
@@ -799,6 +765,10 @@ HELP;
             'skip_url_validation'        => 'yes',
         );
 
+        if ($useDefaultConfigParams && strlen($defaults['encryption_key']) > 0) {
+            $argv['encryption_key '] = $defaults['encryption_key'];
+        }
+        return $argv;
     }
 
     /**
