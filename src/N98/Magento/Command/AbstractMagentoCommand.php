@@ -2,7 +2,6 @@
 
 namespace N98\Magento\Command;
 
-use N98\Util\Console\Helper\MagentoHelper;
 use Composer\Package\PackageInterface;
 use Symfony\Component\Console\Command\Command;
 use Symfony\Component\Console\Input\InputInterface;
@@ -10,6 +9,7 @@ use Symfony\Component\Console\Output\OutputInterface;
 use Composer\Package\Loader\ArrayLoader as PackageLoader;
 use Composer\Factory as ComposerFactory;
 use Composer\IO\ConsoleIO;
+use N98\Util\Console\Helper\MagentoHelper;
 
 /**
  * Class AbstractMagentoCommand
